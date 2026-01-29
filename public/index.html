@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Collaborative Whiteboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    
+    <!-- Landing View -->
+    <div id="landing-view" class="view-container">
+        <div class="landing-content">
+            <h1>Collaborative Whiteboard</h1>
+            <p>Draw and collaborate in real-time. No login required.</p>
+            <div class="actions">
+                <button id="create-btn" class="btn primary-btn">Create Whiteboard</button>
+                <div class="divider">or</div>
+                <div class="join-form">
+                    <input type="text" id="join-id" placeholder="Enter Whiteboard ID">
+                    <button id="join-btn" class="btn secondary-btn">Join</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Whiteboard View -->
+    <div id="whiteboard-view" class="view-container hidden">
+        <div class="toolbar">
+            <div class="room-info">
+                <span>Room ID: <strong id="room-id-display"></strong></span>
+                <button id="copy-btn" class="icon-btn" title="Copy ID">📋</button>
+            </div>
+            <div class="tools">
+                <button class="tool-btn active" data-tool="pen" title="Pen">🖊️</button>
+                <button class="tool-btn" data-tool="eraser" title="Eraser">🧹</button>
+                <input type="color" id="color-picker" value="#000000" title="Color">
+                <input type="range" id="line-width" min="1" max="20" value="2" title="Size">
+                <button id="clear-btn" class="tool-btn" title="Clear Board">🗑️</button>
+            </div>
+            <div class="exit">
+                <button id="exit-btn" class="btn danger-btn">Exit</button>
+            </div>
+        </div>
+        <canvas id="whiteboard"></canvas>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
