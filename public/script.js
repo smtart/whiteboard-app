@@ -57,7 +57,7 @@ const toolBtns = document.querySelectorAll('.tool-btn[data-tool]');
 const usersContainer = $('users-container');
 
 // ─── SOCKET ──────────────────────────────────────────────────────────
-const socket = io({ transports: ['polling', 'websocket'], upgrade: true });
+const socket = io({ transports: ['websocket', 'polling'], upgrade: true });
 
 // ─── UTILS ───────────────────────────────────────────────────────────
 function uid() {
@@ -159,6 +159,7 @@ function restoreSnapshot(snap) {
     S.elements = new Map();
     snap.forEach((el, id) => S.elements.set(id, JSON.parse(JSON.stringify(el))));
     S.selectedIds.clear();
+    invalidateStaticCache();
 
     // Diff: figure out what changed vs what was on the server before
     // Add/update elements now in snap
@@ -269,6 +270,15 @@ function moveElement(el, dx, dy) {
 }
 
 // ─── RENDERER ────────────────────────────────────────────────────────
+// ─── OFFSCREEN CACHE ─────────────────────────────────────────────────
+// Static (completed) elements are drawn to an offscreen canvas once.
+// The main render() blits that bitmap and only redraws the dynamic overlay
+// (current stroke, remote previews, selection handles, cursors).
+let _staticCanvas = null;
+let _staticCtx = null;
+let _staticDirty = true; // when true, rebuild the static cache on next render
+function invalidateStaticCache() { _staticDirty = true; }
+
 let renderRequested = false;
 function requestRender() {
     if (!renderRequested) {
@@ -281,60 +291,103 @@ function render() {
     renderRequested = false;
     const dpr = window.devicePixelRatio || 1;
     const cw = canvas.clientWidth, ch = canvas.clientHeight;
-    if (canvas.width !== cw * dpr || canvas.height !== ch * dpr) {
-        canvas.width = cw * dpr; canvas.height = ch * dpr;
+    const pw = cw * dpr, ph = ch * dpr;
+    if (canvas.width !== pw || canvas.height !== ph) {
+        canvas.width = pw; canvas.height = ph;
+        _staticDirty = true; // canvas resized, cache is invalid
     }
+
+    // ── Rebuild static cache if needed ──────────────────────────────
+    if (_staticDirty) {
+        if (!_staticCanvas) {
+            _staticCanvas = document.createElement('canvas');
+            _staticCtx = _staticCanvas.getContext('2d');
+        }
+        _staticCanvas.width = pw;
+        _staticCanvas.height = ph;
+        _staticCtx.setTransform(1, 0, 0, 1, 0, 0);
+        _staticCtx.clearRect(0, 0, pw, ph);
+
+        // Background
+        const theme = document.documentElement.getAttribute('data-theme');
+        _staticCtx.fillStyle = theme === 'dark' ? '#1a1a2e' : '#ffffff';
+        _staticCtx.fillRect(0, 0, pw, ph);
+
+        _staticCtx.save();
+        _staticCtx.scale(dpr, dpr);
+        _staticCtx.save();
+        _staticCtx.translate(-S.vp.x * S.vp.zoom, -S.vp.y * S.vp.zoom);
+        _staticCtx.scale(S.vp.zoom, S.vp.zoom);
+
+        if (S.showGrid) {
+            // Draw grid onto static cache
+            const savedCtx = ctx;
+            ctx = _staticCtx; // temporarily swap so drawGrid uses the cache
+            drawGrid(cw, ch);
+            ctx = savedCtx;
+        }
+
+        // Draw all completed elements onto static cache
+        const savedCtx = ctx;
+        ctx = _staticCtx;
+        S.elements.forEach(el => {
+            if (el.id === textEditingId) return; // skip, drawn dynamically
+            if (el.type === 'text' && textLocked === el.id) return; // drawn dynamically
+            drawElement(el);
+        });
+        ctx = savedCtx;
+
+        _staticCtx.restore(); // viewport
+        _staticCtx.restore(); // dpr
+        _staticDirty = false;
+    }
+
+    // ── Blit static cache onto main canvas ──────────────────────────
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, pw, ph);
+    ctx.drawImage(_staticCanvas, 0, 0);
 
-    // Fill canvas background
-    const theme = document.documentElement.getAttribute('data-theme');
-    ctx.fillStyle = theme === 'dark' ? '#1a1a2e' : '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
+    // ── Dynamic overlay ─────────────────────────────────────────────
     ctx.save();
     ctx.scale(dpr, dpr);
-
-    // Apply viewport transform
     ctx.save();
     ctx.translate(-S.vp.x * S.vp.zoom, -S.vp.y * S.vp.zoom);
     ctx.scale(S.vp.zoom, S.vp.zoom);
 
-    if (S.showGrid) drawGrid(cw, ch);
-
-    // Draw all elements
-    S.elements.forEach(el => {
-        // Skip element being actively typed — the textarea DOM overlay covers it
-        if (el.id === textEditingId) {
-            // Draw a subtle editing indicator for the local user
-            const b = getElementBounds(el);
+    // Editing text indicator (dynamic because it has animated dashes)
+    if (textEditingId) {
+        const editEl = S.elements.get(textEditingId);
+        if (editEl) {
+            const b = getElementBounds(editEl);
             ctx.save();
             ctx.strokeStyle = 'rgba(129, 140, 248, 0.3)';
             ctx.lineWidth = 1 / S.vp.zoom;
             ctx.setLineDash([4 / S.vp.zoom, 4 / S.vp.zoom]);
             ctx.strokeRect(b.x - 4 / S.vp.zoom, b.y - 4 / S.vp.zoom, b.w + 8 / S.vp.zoom, b.h + 8 / S.vp.zoom);
             ctx.restore();
-            return;
         }
-        // Draw a lock indicator for text locked by remote users
-        if (el.type === 'text' && textLocked === el.id) {
-            drawElement(el);
-            const b = getElementBounds(el);
+    }
+    // Locked text indicator
+    if (textLocked) {
+        const lockEl = S.elements.get(textLocked);
+        if (lockEl) {
+            drawElement(lockEl);
+            const b = getElementBounds(lockEl);
             ctx.save();
             ctx.strokeStyle = 'rgba(251, 146, 60, 0.5)';
             ctx.lineWidth = 1.5 / S.vp.zoom;
             ctx.setLineDash([3 / S.vp.zoom, 3 / S.vp.zoom]);
             ctx.strokeRect(b.x - 3 / S.vp.zoom, b.y - 3 / S.vp.zoom, b.w + 6 / S.vp.zoom, b.h + 6 / S.vp.zoom);
             ctx.restore();
-            return;
         }
-        drawElement(el);
-    });
+    }
+
+    // Current in-progress stroke/shape
     if (S.current) drawElement(S.current);
-    // Draw other users' in-progress strokes
+    // Remote users' in-progress strokes
     S.remotePreviews.forEach(el => drawElement(el));
 
-    // Draw selection
+    // Selection handles
     S.selectedIds.forEach(id => {
         const el = S.elements.get(id);
         if (el) drawSelectionBox(el);
@@ -713,6 +766,7 @@ function handlePointerMove(e) {
         const dy = (e.clientY - S.panStart.y) / S.vp.zoom;
         S.vp.x = S.panStart.vpx - dx;
         S.vp.y = S.panStart.vpy - dy;
+        invalidateStaticCache();
         requestRender();
         return;
     }
@@ -859,6 +913,7 @@ function handleSelectUp() {
         S.resizeOrigEl = null;
         if (orig) {
             pushHistory();
+            invalidateStaticCache();
             const el = S.elements.get(orig.id);
             if (el) socket.emit('update-element', el);
         }
@@ -866,6 +921,7 @@ function handleSelectUp() {
     }
     if (S.dragStart && S.selectedIds.size > 0) {
         pushHistory();
+        invalidateStaticCache();
         S.selectedIds.forEach(id => {
             const el = S.elements.get(id);
             if (el) socket.emit('update-element', el);
@@ -931,6 +987,7 @@ function handlePenUp() {
         S.elements.set(S.current.id, S.current);
         socket.emit('add-element', S.current);
         socket.emit('drawing-done', { id: S.current.id });
+        invalidateStaticCache();
         pushHistory();
     }
     S.current = null;
@@ -958,6 +1015,7 @@ function handleShapeUp() {
         S.elements.set(S.current.id, S.current);
         socket.emit('add-element', S.current);
         socket.emit('drawing-done', { id: S.current.id });
+        invalidateStaticCache();
         pushHistory();
     }
     S.current = null; S.dragStart = null;
@@ -991,6 +1049,7 @@ function handleLineUp() {
         S.elements.set(S.current.id, S.current);
         socket.emit('add-element', S.current);
         socket.emit('drawing-done', { id: S.current.id });
+        invalidateStaticCache();
         pushHistory();
     }
     S.current = null;
@@ -1343,6 +1402,7 @@ function zoomTo(newZoom, cx, cy) {
     S.vp.zoom = newZoom;
     S.vp.x = wx - cx / S.vp.zoom;
     S.vp.y = wy - cy / S.vp.zoom;
+    invalidateStaticCache();
     zoomDisplay.textContent = Math.round(S.vp.zoom * 100) + '%';
     requestRender();
 }
@@ -1360,6 +1420,7 @@ function handleWheel(e) {
         // Plain scroll = Pan the canvas (Miro-style)
         S.vp.x += e.deltaX / S.vp.zoom;
         S.vp.y += e.deltaY / S.vp.zoom;
+        invalidateStaticCache();
         requestRender();
     }
 }
@@ -1386,24 +1447,28 @@ socket.on('room-state', data => {
     S.history = [snapshot()]; S.historyIdx = 0;
     updateUndoRedo();
     renderUsers();
+    invalidateStaticCache();
     requestRender();
 });
 
 socket.on('element-added', el => {
-    if (el.type === 'image') imgCache.delete(el.id); // ensure fresh load
+    if (el.type === 'image') imgCache.delete(el.id);
     S.elements.set(el.id, el);
+    invalidateStaticCache();
     requestRender();
 });
 socket.on('element-updated', el => {
-    if (el.type === 'image') imgCache.delete(el.id); // reload if src changed
+    if (el.type === 'image') imgCache.delete(el.id);
     S.elements.set(el.id, el);
+    invalidateStaticCache();
     requestRender();
 });
 socket.on('elements-deleted', ids => {
     ids.forEach(id => { S.elements.delete(id); imgCache.delete(id); });
+    invalidateStaticCache();
     requestRender();
 });
-socket.on('board-cleared', () => { S.elements.clear(); imgCache.clear(); S.remotePreviews.clear(); requestRender(); });
+socket.on('board-cleared', () => { S.elements.clear(); imgCache.clear(); S.remotePreviews.clear(); invalidateStaticCache(); requestRender(); });
 
 // Live drawing preview from other users
 socket.on('drawing-preview', data => {
