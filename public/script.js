@@ -31,7 +31,7 @@ const S = {
     dragStart: null, dragOrigPositions: null,
     isPanning: false, panStart: null, spaceHeld: false,
     handMode: false, prevTool: 'select',
-    showGrid: true, theme: 'dark',
+    showGrid: false, theme: 'dark',
     history: [], historyIdx: -1,
     cursors: new Map(), cursorTargets: new Map(), users: new Map(),
     needsRender: true,
