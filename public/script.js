@@ -566,9 +566,9 @@ function handlePointerDown(e) {
     }
     if (e.button !== 0) return;
 
-    // Start long-press timer on touch devices
+    // Start long-press timer on touch devices (skip for text tool — it needs immediate focus)
     longPressFired = false;
-    if (e.pointerType === 'touch') {
+    if (e.pointerType === 'touch' && S.tool !== 'text') {
         const startX = e.clientX, startY = e.clientY;
         longPressTimer = setTimeout(() => {
             longPressFired = true;
@@ -915,7 +915,11 @@ function openTextInput(p, existingEl) {
     }
 
     textInput.style.display = 'block';
-    setTimeout(() => textInput.focus(), 50);
+    // Focus immediately (synchronous) so mobile keyboard opens on the user gesture.
+    // setTimeout breaks the gesture chain on mobile, preventing keyboard from appearing.
+    textInput.focus();
+    // Ensure focus sticks after layout
+    requestAnimationFrame(() => textInput.focus());
     S.drawing = false;
 }
 
