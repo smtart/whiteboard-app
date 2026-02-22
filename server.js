@@ -157,6 +157,14 @@ io.on('connection', (socket) => {
         socket.to(roomId).emit('drawing-preview', { userId: socket.id, el });
     });
 
+    // ── Pen delta: tiny incremental point packets for real-time ink sync ─
+    // Each packet contains only NEW points since the last emit (O(1) size).
+    socket.on('pen-delta', (data) => {
+        if (!roomId || !rateOk(socket.id, 2000)) return;
+        if (!data || typeof data.id !== 'string' || !Array.isArray(data.pts)) return;
+        socket.to(roomId).emit('pen-delta', { userId: socket.id, id: data.id, pts: data.pts, style: data.style });
+    });
+
     socket.on('drawing-done', (data) => {
         if (!roomId) return;
         socket.to(roomId).emit('drawing-done', { userId: socket.id, ...data });

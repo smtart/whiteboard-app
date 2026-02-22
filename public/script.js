@@ -878,8 +878,18 @@ function handleSelectUp() {
 // ─── PEN TOOL ────────────────────────────────────────────────────────
 function handlePenDown(p) {
     S.current = createElement('pen', { points: [{ x: p.x, y: p.y }] });
+    S._syncedPointCount = 1; // track how many points have been synced
+    // Immediately broadcast the stroke start so remote previews appear instantly
+    if (S.roomId) socket.emit('pen-delta', {
+        id: S.current.id,
+        pts: [{ x: p.x, y: p.y }],
+        style: S.current.style,
+    });
     requestRender();
 }
+
+// Minimum squared distance between stored points (2px^2 in world space at zoom=1)
+const MIN_POINT_DIST_SQ = 4;
 
 function handlePenMove(p, e) {
     if (!S.current) return;
@@ -889,16 +899,30 @@ function handlePenMove(p, e) {
     if (events && events.length > 1) {
         const rect = canvas.getBoundingClientRect();
         for (const ce of events) {
-            const sx = ce.clientX - rect.left;
-            const sy = ce.clientY - rect.top;
-            S.current.points.push(screenToWorld(sx, sy));
+            const pt = screenToWorld(ce.clientX - rect.left, ce.clientY - rect.top);
+            const last = S.current.points[S.current.points.length - 1];
+            const dx = pt.x - last.x, dy = pt.y - last.y;
+            if (dx * dx + dy * dy >= MIN_POINT_DIST_SQ) {
+                S.current.points.push(pt);
+            }
         }
     } else {
-        S.current.points.push({ x: p.x, y: p.y });
+        const last = S.current.points[S.current.points.length - 1];
+        const dx = p.x - last.x, dy = p.y - last.y;
+        if (dx * dx + dy * dy >= MIN_POINT_DIST_SQ) {
+            S.current.points.push({ x: p.x, y: p.y });
+        }
     }
-    // Emit immediately — pen sync has zero tolerance for throttle delay.
-    immediatePreviewEmit(S.current);
-    // requestRender() will be called by handlePointerMove after this returns.
+    // Delta sync: only send points the remote hasn't seen yet.
+    // Keeps packet size O(1) instead of O(n) as stroke grows.
+    const synced = S._syncedPointCount || 0;
+    const allPts = S.current.points;
+    if (allPts.length > synced) {
+        const newPts = allPts.slice(synced);
+        S._syncedPointCount = allPts.length;
+        if (S.roomId) socket.emit('pen-delta', { id: S.current.id, pts: newPts });
+    }
+    // requestRender() is called by handlePointerMove after this returns.
 }
 
 function handlePenUp() {
@@ -1392,6 +1416,20 @@ socket.on('drawing-preview', data => {
 socket.on('drawing-done', data => {
     if (!data || !data.userId) return;
     S.remotePreviews.delete(data.userId);
+    requestRender();
+});
+
+// Pen delta: incrementally append new points to remote user's in-progress stroke.
+// Much more efficient than full drawing-preview for long strokes.
+socket.on('pen-delta', data => {
+    if (!data || !data.userId || !data.id || !Array.isArray(data.pts)) return;
+    let preview = S.remotePreviews.get(data.userId);
+    if (!preview || preview.id !== data.id) {
+        // First delta for this stroke — create the preview element
+        preview = { id: data.id, type: 'pen', points: [], style: data.style || {} };
+        S.remotePreviews.set(data.userId, preview);
+    }
+    for (const pt of data.pts) preview.points.push(pt);
     requestRender();
 });
 
