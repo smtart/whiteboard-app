@@ -1,10 +1,11 @@
 {
   "name": "whiteboard-app",
-  "version": "1.0.0",
-  "description": "Real-time Collaborative Whiteboard",
+  "version": "2.0.0",
+  "description": "Real-time Collaborative Whiteboard — SketchFlow",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node --watch server.js"
   },
   "dependencies": {
     "express": "^5.2.1",

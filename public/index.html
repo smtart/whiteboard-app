@@ -1,52 +1,330 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
+
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Collaborative Whiteboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description"
+        content="Free real-time collaborative whiteboard. Draw, sketch, and brainstorm together — no login required.">
+    <title>SketchFlow — Collaborative Whiteboard</title>
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎨</text></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
+
 <body>
-    
-    <!-- Landing View -->
-    <div id="landing-view" class="view-container">
+
+    <!-- ═══════════════ Landing View ═══════════════ -->
+    <div id="landing" class="view active">
+        <div class="landing-bg">
+            <div class="grid-pattern"></div>
+        </div>
         <div class="landing-content">
-            <h1>Collaborative Whiteboard</h1>
-            <p>Draw and collaborate in real-time. No login required.</p>
-            <div class="actions">
-                <button id="create-btn" class="btn primary-btn">Create Whiteboard</button>
-                <div class="divider">or</div>
-                <div class="join-form">
-                    <input type="text" id="join-id" placeholder="Enter Whiteboard ID">
-                    <button id="join-btn" class="btn secondary-btn">Join</button>
+            <div class="logo-mark">
+                <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                    <rect width="48" height="48" rx="12" fill="url(#logo-grad)" />
+                    <path d="M14 34V16l8 6 8-6v18" stroke="#fff" stroke-width="2.5" stroke-linecap="round"
+                        stroke-linejoin="round" fill="none" />
+                    <defs>
+                        <linearGradient id="logo-grad" x1="0" y1="0" x2="48" y2="48">
+                            <stop stop-color="#818cf8" />
+                            <stop offset="1" stop-color="#06b6d4" />
+                        </linearGradient>
+                    </defs>
+                </svg>
+            </div>
+            <h1>SketchFlow</h1>
+            <p class="tagline">Real-time collaborative whiteboard.<br>Draw, sketch & brainstorm together — <strong>no
+                    login needed</strong>.</p>
+
+            <div class="features-row">
+                <div class="feature-chip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2">
+                        <path d="M12 20h9" />
+                        <path
+                            d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838.838-2.872a2 2 0 0 1 .506-.855z" />
+                    </svg> Draw</div>
+                <div class="feature-chip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                    </svg> Shapes</div>
+                <div class="feature-chip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2">
+                        <path d="M17 6.1H3" />
+                        <path d="M21 12.1H3" />
+                        <path d="M15.1 18H3" />
+                    </svg> Text</div>
+                <div class="feature-chip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                        <circle cx="9" cy="7" r="4" />
+                        <line x1="19" y1="8" x2="19" y2="14" />
+                        <line x1="22" y1="11" x2="16" y2="11" />
+                    </svg> Collaborate</div>
+            </div>
+
+            <div class="landing-actions">
+                <button id="create-btn" class="btn-primary btn-lg">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
+                    Create Board
+                </button>
+                <div class="divider-line"><span>or join existing</span></div>
+                <div class="join-row">
+                    <input type="text" id="join-id" placeholder="Enter Board ID" maxlength="36" autocomplete="off"
+                        spellcheck="false">
+                    <button id="join-btn" class="btn-secondary">Join</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Whiteboard View -->
-    <div id="whiteboard-view" class="view-container hidden">
-        <div class="toolbar">
-            <div class="room-info">
-                <span>Room ID: <strong id="room-id-display"></strong></span>
-                <button id="copy-btn" class="icon-btn" title="Copy ID">📋</button>
+    <!-- ═══════════════ Whiteboard View ═══════════════ -->
+    <div id="app" class="view">
+
+        <!-- ── Top Toolbar ── -->
+        <header id="toolbar">
+            <div class="toolbar-group toolbar-left">
+                <button id="exit-btn" class="exit-btn" title="Exit this board">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                        <polyline points="16 17 21 12 16 7" />
+                        <line x1="21" y1="12" x2="9" y2="12" />
+                    </svg>
+                    <span>Exit</span>
+                </button>
+                <div class="room-badge" id="room-badge">
+                    <span id="room-id-display" style="display:none"></span>
+                    <button id="invite-btn" class="invite-btn" title="Invite people to collaborate">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                            <circle cx="9" cy="7" r="4" />
+                            <line x1="19" y1="8" x2="19" y2="14" />
+                            <line x1="22" y1="11" x2="16" y2="11" />
+                        </svg>
+                        <span>Invite</span>
+                    </button>
+                </div>
             </div>
-            <div class="tools">
-                <button class="tool-btn active" data-tool="pen" title="Pen">🖊️</button>
-                <button class="tool-btn" data-tool="eraser" title="Eraser">🧹</button>
-                <input type="color" id="color-picker" value="#000000" title="Color">
-                <input type="range" id="line-width" min="1" max="20" value="2" title="Size">
-                <button id="clear-btn" class="tool-btn" title="Clear Board">🗑️</button>
+
+            <div class="toolbar-group toolbar-center">
+                <div class="tool-group">
+                    <button class="tool-btn active" data-tool="select" title="Select (V)">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M5 3l14 9-6 2-2 6z" />
+                        </svg>
+                    </button>
+                    <button class="tool-btn" data-tool="pen" title="Pen (P)">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path
+                                d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352 4.352-1.32a2 2 0 0 0 .83-.497z" />
+                        </svg>
+                    </button>
+                    <div class="tool-divider"></div>
+                    <div class="shapes-dropdown-wrapper">
+                        <button class="tool-btn" id="shapes-btn" title="Shapes">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2" />
+                            </svg>
+                            <span class="shapes-label">Shapes</span>
+                        </button>
+                        <div class="shapes-dropdown" id="shapes-dropdown">
+                            <button class="shape-option" data-tool="rectangle" title="Rectangle (R)">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                                </svg>
+                                <span>Rectangle</span>
+                            </button>
+                            <button class="shape-option" data-tool="ellipse" title="Ellipse (O)">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <ellipse cx="12" cy="12" rx="10" ry="8" />
+                                </svg>
+                                <span>Ellipse</span>
+                            </button>
+                            <button class="shape-option" data-tool="line" title="Line (L)">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <line x1="5" y1="19" x2="19" y2="5" />
+                                </svg>
+                                <span>Line</span>
+                            </button>
+                            <button class="shape-option" data-tool="arrow" title="Arrow (A)">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2">
+                                    <line x1="5" y1="12" x2="19" y2="12" />
+                                    <polyline points="12 5 19 12 12 19" />
+                                </svg>
+                                <span>Arrow</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="tool-divider"></div>
+                    <button class="tool-btn" data-tool="text" title="Text (T)">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polyline points="4 7 4 4 20 4 20 7" />
+                            <line x1="12" y1="4" x2="12" y2="20" />
+                            <line x1="8" y1="20" x2="16" y2="20" />
+                        </svg>
+                    </button>
+                    <button class="tool-btn" data-tool="eraser" title="Eraser (E)">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path
+                                d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
+                            <line x1="7" y1="21" x2="21" y2="21" />
+                        </svg>
+                    </button>
+                    <div class="tool-divider"></div>
+                    <!-- Upload Image -->
+                    <input type="file" id="img-upload-input" accept="image/*" style="display:none">
+                    <button id="img-upload-btn" class="tool-btn" title="Upload Image">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" />
+                            <circle cx="8.5" cy="8.5" r="1.5" />
+                            <polyline points="21 15 16 10 5 21" />
+                        </svg>
+                    </button>
+                    <!-- Color circle: visible when element selected (mobile) -->
+                    <div class="tool-divider" id="sel-color-divider" style="display:none"></div>
+                    <button id="sel-color-btn" class="tool-btn" title="Change Color" style="display:none;padding:4px">
+                        <span id="sel-color-dot"
+                            style="display:block;width:18px;height:18px;border-radius:50%;border:2px solid rgba(128,128,128,0.5);background:#000"></span>
+                    </button>
+                </div>
             </div>
-            <div class="exit">
-                <button id="exit-btn" class="btn danger-btn">Exit</button>
+
+            <div class="toolbar-group toolbar-right">
+                <button id="undo-btn" class="tb-btn" title="Undo (Ctrl+Z)" disabled>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="1 4 1 10 7 10" />
+                        <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                    </svg>
+                </button>
+                <button id="redo-btn" class="tb-btn" title="Redo (Ctrl+Y)" disabled>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10" />
+                        <path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10" />
+                    </svg>
+                </button>
+                <div class="tb-divider"></div>
+                <button id="export-btn" class="tb-btn" title="Export PNG (Ctrl+S)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                </button>
+                <button id="theme-btn" class="tb-btn" title="Toggle Theme">
+                    <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <circle cx="12" cy="12" r="4" />
+                        <path d="M12 2v2" />
+                        <path d="M12 20v2" />
+                        <path d="m4.93 4.93 1.41 1.41" />
+                        <path d="m17.66 17.66 1.41 1.41" />
+                        <path d="M2 12h2" />
+                        <path d="M20 12h2" />
+                        <path d="m6.34 17.66-1.41 1.41" />
+                        <path d="m19.07 4.93-1.41 1.41" />
+                    </svg>
+                    <svg class="icon-moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z" />
+                    </svg>
+                </button>
+                <button id="clear-btn" class="tb-btn" title="Clear Board">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 6h18" />
+                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                    </svg>
+                </button>
+                <div class="tb-divider"></div>
+                <div id="users-container" class="users-row"></div>
+            </div>
+        </header>
+
+        <!-- ── Properties Panel ── -->
+        <aside id="props-panel">
+            <div class="props-section">
+                <label class="props-label">Stroke</label>
+                <div class="color-swatches" id="stroke-swatches"></div>
+                <input type="color" id="stroke-color" value="#e4e4e7">
+            </div>
+            <div class="props-section" id="fill-section">
+                <label class="props-label">Fill</label>
+                <div class="color-swatches" id="fill-swatches"></div>
+                <input type="color" id="fill-color" value="#00000000">
+            </div>
+            <div class="props-section">
+                <label class="props-label">Width <span id="width-value">2</span></label>
+                <input type="range" id="stroke-width" min="1" max="24" value="2">
+            </div>
+            <div class="props-section">
+                <label class="props-label">Opacity <span id="opacity-value">100%</span></label>
+                <input type="range" id="opacity-range" min="10" max="100" value="100">
+            </div>
+        </aside>
+
+        <!-- ── Canvas ── -->
+        <canvas id="canvas"></canvas>
+
+        <!-- ── Floating Text Input ── -->
+        <textarea id="text-input"></textarea>
+
+        <!-- ── Status Bar ── -->
+        <footer id="status-bar">
+            <div class="status-left">
+                <button id="zoom-out" class="sb-btn" title="Zoom Out">−</button>
+                <span id="zoom-level">100%</span>
+                <button id="zoom-in" class="sb-btn" title="Zoom In">+</button>
+                <button id="zoom-reset" class="sb-btn" title="Reset Zoom">⊙</button>
+            </div>
+            <div class="status-right">
+                <button id="grid-btn" class="sb-btn" title="Toggle Grid (G)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" />
+                        <line x1="3" y1="9" x2="21" y2="9" />
+                        <line x1="3" y1="15" x2="21" y2="15" />
+                        <line x1="9" y1="3" x2="9" y2="21" />
+                        <line x1="15" y1="3" x2="15" y2="21" />
+                    </svg>
+                </button>
+                <span id="cursor-pos">0, 0</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- ═══════════════ Toast Container ═══════════════ -->
+    <div id="toast-container"></div>
+
+    <!-- ═══════════════ Modal ═══════════════ -->
+    <div id="modal-overlay" class="modal-overlay hidden">
+        <div class="modal-content">
+            <p id="modal-message"></p>
+            <div class="modal-actions">
+                <button id="modal-cancel" class="btn-secondary">Cancel</button>
+                <button id="modal-confirm" class="btn-danger">Confirm</button>
             </div>
         </div>
-        <canvas id="whiteboard"></canvas>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="script.js"></script>
 </body>
+
 </html>
