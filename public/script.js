@@ -1685,8 +1685,9 @@ canvas.addEventListener('pointerdown', () => {
 window.addEventListener('resize', () => requestRender());
 
 // ─── NAVIGATION ──────────────────────────────────────────────────────
-function joinRoom(id) {
+function joinRoom(id, name) {
     S.roomId = id;
+    S.myName = name || 'Anonymous';
     roomDisplay.textContent = id;
     const url = new URL(window.location);
     url.searchParams.set('room', id);
@@ -1700,19 +1701,61 @@ function joinRoom(id) {
     S.historyIdx = 0;
     updateUndoRedo();
 
-    socket.emit('join-room', { roomId: id });
+    socket.emit('join-room', { roomId: id, name: S.myName });
     requestRender();
 }
 
-$('create-btn').addEventListener('click', () => {
+// ─── NAME PROMPT ─────────────────────────────────────────────────────
+function promptName() {
+    return new Promise(resolve => {
+        const modal = $('name-modal');
+        const input = $('name-input');
+        const btn = $('name-submit');
+
+        // Pre-fill from localStorage if returning user
+        const saved = localStorage.getItem('sketchflow-name') || '';
+        input.value = saved;
+
+        modal.classList.remove('hidden');
+        setTimeout(() => input.focus(), 80);
+
+        const submit = () => {
+            const name = input.value.trim();
+            if (!name) {
+                input.style.borderColor = '#ef4444';
+                input.setAttribute('placeholder', 'Please enter your name');
+                input.focus();
+                return;
+            }
+            localStorage.setItem('sketchflow-name', name);
+            modal.classList.add('hidden');
+            btn.removeEventListener('click', submit);
+            input.removeEventListener('keydown', onKey);
+            resolve(name);
+        };
+
+        const onKey = (e) => {
+            input.style.borderColor = '';  // reset error highlight on typing
+            if (e.key === 'Enter') submit();
+        };
+
+        btn.addEventListener('click', submit);
+        input.addEventListener('keydown', onKey);
+    });
+}
+
+// ─── ENTRY POINTS ────────────────────────────────────────────────────
+$('create-btn').addEventListener('click', async () => {
+    const name = await promptName();
     const id = uid().split('-')[0];
-    joinRoom(id);
+    joinRoom(id, name);
 });
 
-$('join-btn').addEventListener('click', () => {
+$('join-btn').addEventListener('click', async () => {
     const id = $('join-id').value.trim();
     if (!id) { showToast('Please enter a Board ID'); return; }
-    joinRoom(id);
+    const name = await promptName();
+    joinRoom(id, name);
 });
 
 $('join-id').addEventListener('keydown', e => {
@@ -1825,10 +1868,13 @@ imgUploadInput.addEventListener('change', () => {
 });
 
 // ─── INIT ────────────────────────────────────────────────────────────
-function init() {
+async function init() {
     const params = new URLSearchParams(window.location.search);
     const room = params.get('room');
-    if (room) joinRoom(room);
+    if (room) {
+        const name = await promptName();
+        joinRoom(room, name);
+    }
 
     // Detect theme first so default color is correct
     const isLight = window.matchMedia('(prefers-color-scheme: light)').matches;
