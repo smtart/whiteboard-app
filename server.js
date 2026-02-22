@@ -13,7 +13,7 @@ const io = new Server(server, {
         origin: '*',
         methods: ['GET', 'POST'],
     },
-    transports: ['websocket', 'polling'],  // WS first for lowest latency
+    transports: ['polling', 'websocket'],  // polling first for Render proxy
     allowUpgrades: true,
 });
 
@@ -162,7 +162,7 @@ io.on('connection', (socket) => {
     socket.on('pen-delta', (data) => {
         if (!roomId || !rateOk(socket.id, 2000)) return;
         if (!data || typeof data.id !== 'string' || !Array.isArray(data.pts)) return;
-        socket.volatile.to(roomId).emit('pen-delta', { userId: socket.id, id: data.id, pts: data.pts, style: data.style });
+        socket.to(roomId).emit('pen-delta', { userId: socket.id, id: data.id, pts: data.pts, style: data.style });
     });
 
     socket.on('drawing-done', (data) => {
