@@ -302,9 +302,32 @@ function render() {
 
     if (S.showGrid) drawGrid(cw, ch);
 
-    // Draw all elements (skip element being actively typed — textInput DOM covers it)
+    // Draw all elements
     S.elements.forEach(el => {
-        if (el.id === textEditingId) return;
+        // Skip element being actively typed — the textarea DOM overlay covers it
+        if (el.id === textEditingId) {
+            // Draw a subtle editing indicator for the local user
+            const b = getElementBounds(el);
+            ctx.save();
+            ctx.strokeStyle = 'rgba(129, 140, 248, 0.3)';
+            ctx.lineWidth = 1 / S.vp.zoom;
+            ctx.setLineDash([4 / S.vp.zoom, 4 / S.vp.zoom]);
+            ctx.strokeRect(b.x - 4 / S.vp.zoom, b.y - 4 / S.vp.zoom, b.w + 8 / S.vp.zoom, b.h + 8 / S.vp.zoom);
+            ctx.restore();
+            return;
+        }
+        // Draw a lock indicator for text locked by remote users
+        if (el.type === 'text' && textLocked === el.id) {
+            drawElement(el);
+            const b = getElementBounds(el);
+            ctx.save();
+            ctx.strokeStyle = 'rgba(251, 146, 60, 0.5)';
+            ctx.lineWidth = 1.5 / S.vp.zoom;
+            ctx.setLineDash([3 / S.vp.zoom, 3 / S.vp.zoom]);
+            ctx.strokeRect(b.x - 3 / S.vp.zoom, b.y - 3 / S.vp.zoom, b.w + 6 / S.vp.zoom, b.h + 6 / S.vp.zoom);
+            ctx.restore();
+            return;
+        }
         drawElement(el);
     });
     if (S.current) drawElement(S.current);
@@ -318,6 +341,9 @@ function render() {
     });
 
     ctx.restore(); // viewport
+
+    // Reposition the text overlay if currently editing
+    repositionTextInput();
 
     // Draw cursors in screen space
     drawRemoteCursors();
@@ -551,6 +577,9 @@ let longPressTimer = null;
 let longPressFired = false;
 const LONG_PRESS_MS = 400;
 const LONG_PRESS_MOVE_THRESHOLD = 8; // px movement cancels long-press
+// Double-tap constants (used in both pointerdown handler and double-tap listener)
+const DOUBLE_TAP_DELAY = 300; // ms
+const DOUBLE_TAP_DIST = 40;   // px tolerance
 
 function cancelLongPress() {
     if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
@@ -566,9 +595,9 @@ function handlePointerDown(e) {
     }
     if (e.button !== 0) return;
 
-    // Start long-press timer on touch devices (skip for text tool — it needs immediate focus)
+    // Start long-press timer on touch devices
     longPressFired = false;
-    if (e.pointerType === 'touch' && S.tool !== 'text') {
+    if (e.pointerType === 'touch') {
         const startX = e.clientX, startY = e.clientY;
         longPressTimer = setTimeout(() => {
             longPressFired = true;
@@ -584,9 +613,20 @@ function handlePointerDown(e) {
 
         // Store start coords to detect movement cancellation
         S._longPressStart = { x: startX, y: startY };
+    } else {
+        // Store mouse start coords too (for drag detection in text tool)
+        S._longPressStart = { x: e.clientX, y: e.clientY };
     }
 
     const p = getPointerWorld(e);
+
+    // For text tool on touch: cancel long-press immediately (don't pan) and
+    // prevent touch-to-mouse simulation so we stay in the gesture boundary
+    if (S.tool === 'text' && e.pointerType === 'touch') {
+        cancelLongPress();
+        e.preventDefault();
+    }
+
     S.drawing = true;
 
     switch (S.tool) {
@@ -594,7 +634,49 @@ function handlePointerDown(e) {
         case 'pen': handlePenDown(p); break;
         case 'rectangle': case 'ellipse': handleShapeDown(p); break;
         case 'line': case 'arrow': handleLineDown(p); break;
-        case 'text': handleTextDown(p); break;
+        case 'text':
+            if (e.pointerType === 'touch') {
+                // Mobile: delay opening the editor by the double-tap window.
+                clearTimeout(S._textTapTimer);
+                S._textTapTimer = setTimeout(() => {
+                    S._textTapTimer = null;
+                    handleTextDown(p, e);
+                }, DOUBLE_TAP_DELAY + 30);
+            } else {
+                // Desktop: detect double-click HERE in pointerdown (before click fires)
+                // by tracking click timing ourselves.
+                const now = Date.now();
+                const mdx = e.clientX - (S._lastTextClickX || 0);
+                const mdy = e.clientY - (S._lastTextClickY || 0);
+                const isDoubleClick = (now - (S._lastTextClickTime || 0)) < 350
+                    && Math.hypot(mdx, mdy) < 40;
+
+                // Hit-test for existing text at this point
+                let textHit = null;
+                for (const el of [...S.elements.values()].reverse()) {
+                    if (el.type === 'text' && hitTest(el, p.x, p.y)) { textHit = el; break; }
+                }
+
+                if (isDoubleClick && textHit) {
+                    e.preventDefault();
+                    clearTimeout(_desktopTextTimer);
+                    _desktopTextTimer = null;
+                    S._pendingTextPoint = null;
+                    S._lastTextClickTime = 0;
+                    S.drawing = false; // prevent stuck drag state
+                    selectTextElement(textHit);
+                    return;
+                }
+
+                // Track this click for future double-click detection
+                S._lastTextClickTime = now;
+                S._lastTextClickX = e.clientX;
+                S._lastTextClickY = e.clientY;
+
+                // Defer to click event
+                S._pendingTextPoint = p;
+            }
+            break;
         case 'eraser': handleEraserDown(p); break;
     }
 }
@@ -618,6 +700,12 @@ function handlePointerMove(e) {
     if (longPressTimer && S._longPressStart) {
         const moved = Math.hypot(e.clientX - S._longPressStart.x, e.clientY - S._longPressStart.y);
         if (moved > LONG_PRESS_MOVE_THRESHOLD) cancelLongPress();
+    }
+
+    // Clear pending text point if mouse moved (it was a drag, not a click)
+    if (S._pendingTextPoint && S._longPressStart) {
+        const moved = Math.hypot(e.clientX - S._longPressStart.x, e.clientY - S._longPressStart.y);
+        if (moved > 5) S._pendingTextPoint = null;
     }
 
     if (S.isPanning) {
@@ -874,40 +962,80 @@ function handleLineUp() {
 // ─── TEXT TOOL ───────────────────────────────────────────────────────
 let textEditingId = null;   // ID of the element currently being typed into
 let textLocked = null;      // ID of element locked by a remote user
-let _textCommitting = false; // guard against re-entrant commitText
+let _textCommitting = false; // guard against recursive commitText calls
 
 const throttledTextPreview = throttle((el) => {
     if (S.roomId) socket.emit('text-preview', el);
 }, 50);
 
-function openTextInput(p, existingEl) {
-    const sp = worldToScreen(p.x, p.y);
+// Reposition the textarea to stay aligned with the text element during pan/zoom
+function repositionTextInput() {
+    if (!textEditingId) return;
+    const el = S.elements.get(textEditingId);
+    if (!el) return;
+    const sp = worldToScreen(el.x, el.y);
+    const rect = canvas.getBoundingClientRect();
+    textInput.style.left = (rect.left + sp.x) + 'px';
+    textInput.style.top = (rect.top + sp.y) + 'px';
+    const fs = (el.style.fontSize * S.vp.zoom);
+    textInput.style.fontSize = fs + 'px';
+    textInput.style.lineHeight = (fs * 1.3) + 'px';
+}
+
+// Auto-resize textarea to fit its content
+function autoResizeTextInput() {
+    textInput.style.height = 'auto';
+    textInput.style.height = textInput.scrollHeight + 'px';
+    // Also expand width to fit longest line
+    const minW = 80;
+    textInput.style.width = 'auto';
+    textInput.style.width = Math.max(minW, textInput.scrollWidth + 8) + 'px';
+}
+
+function openTextInput(p, existingEl, pointerEvent) {
+    // If already editing the same element, just refocus
+    if (existingEl && textEditingId === existingEl.id) {
+        textInput.focus();
+        return;
+    }
+    // Commit any previously open text first
+    if (textEditingId) {
+        commitText();
+    }
+
     const rect = canvas.getBoundingClientRect();
 
     if (existingEl) {
-        // Edit existing element
+        // ── Edit existing element ──
         textEditingId = existingEl.id;
         textInput.value = existingEl.text || '';
         const esSp = worldToScreen(existingEl.x, existingEl.y);
         textInput.style.left = (rect.left + esSp.x) + 'px';
         textInput.style.top = (rect.top + esSp.y) + 'px';
-        textInput.style.fontSize = (existingEl.style.fontSize * S.vp.zoom) + 'px';
+        const fs = existingEl.style.fontSize * S.vp.zoom;
+        textInput.style.fontSize = fs + 'px';
+        textInput.style.lineHeight = (fs * 1.3) + 'px';
         textInput.style.color = existingEl.style.strokeColor;
         textInput.dataset.wx = existingEl.x;
         textInput.dataset.wy = existingEl.y;
+        // Lock for others
         if (S.roomId) socket.emit('text-lock', { id: existingEl.id });
     } else {
-        // New element — create immediately so remote users see placeholder
+        // ── New element — create immediately so remote users see placeholder ──
         const el = createElement('text', {
             x: p.x, y: p.y, text: '',
         });
         textEditingId = el.id;
         S.elements.set(el.id, el);
         socket.emit('add-element', el);
+        if (S.roomId) socket.emit('text-lock', { id: el.id });
 
+        const sp = worldToScreen(p.x, p.y);
         textInput.style.left = (rect.left + sp.x) + 'px';
         textInput.style.top = (rect.top + sp.y) + 'px';
-        textInput.style.fontSize = (S.fontSize * S.vp.zoom) + 'px';
+        const fs = S.fontSize * S.vp.zoom;
+        textInput.style.fontSize = fs + 'px';
+        textInput.style.lineHeight = (fs * 1.3) + 'px';
         textInput.style.color = S.strokeColor;
         textInput.value = '';
         textInput.dataset.wx = p.x;
@@ -915,53 +1043,66 @@ function openTextInput(p, existingEl) {
     }
 
     textInput.style.display = 'block';
-    // Focus synchronously — required for mobile keyboard to open on user gesture
+    autoResizeTextInput();
+
+    // Focus the textarea. This is called either:
+    //  • from a canvas 'click' handler (desktop) — focus always works here
+    //  • from pointerdown (mobile touch) — sync focus opens the iOS keyboard
     textInput.focus();
-    requestAnimationFrame(() => textInput.focus());
+    textInput.selectionStart = textInput.selectionEnd = textInput.value.length;
+
     S.drawing = false;
+    requestRender();
 }
 
-function handleTextDown(p) {
-    // If already editing, commit the current text first (prevents duplicates)
+function handleTextDown(p, pointerEvent) {
+    // If already editing, commit the old text first
     if (textEditingId) {
         commitText();
     }
-    openTextInput(p, null);
+    // Hit-test: check if clicking on an existing text element
+    let found = null;
+    const els = [...S.elements.values()].reverse();
+    for (const el of els) {
+        if (el.type === 'text' && hitTest(el, p.x, p.y)) { found = el; break; }
+    }
+    if (found) {
+        if (textLocked === found.id) {
+            showToast('Another user is editing this text');
+            return;
+        }
+        openTextInput({ x: found.x, y: found.y }, found, pointerEvent);
+    } else {
+        openTextInput(p, null, pointerEvent);
+    }
 }
 
 function commitText() {
-    // Guard: prevent re-entrant calls (blur fires when we hide the input)
-    if (_textCommitting) return;
-    if (!textEditingId) {
-        // Nothing to commit — just hide
-        textInput.style.display = 'none';
-        textInput.value = '';
-        return;
-    }
+    if (_textCommitting) return; // prevent recursive calls
     _textCommitting = true;
 
     const text = textInput.value.trim();
     const id = textEditingId;
-
-    // Reset state BEFORE hiding (so blur handler doesn't re-trigger)
-    textEditingId = null;
     textInput.style.display = 'none';
     textInput.value = '';
+    textEditingId = null;
 
-    const el = S.elements.get(id);
-    if (text && el) {
-        el.text = text;
-        socket.emit('update-element', el);
-        pushHistory();
-    } else if (!text && el) {
-        // Empty text — delete the placeholder
-        S.elements.delete(id);
-        socket.emit('delete-elements', [id]);
+    if (id) {
+        const el = S.elements.get(id);
+        if (text && el) {
+            el.text = text;
+            socket.emit('update-element', el);
+            pushHistory();
+        } else if (!text && el) {
+            // Empty — delete the placeholder
+            S.elements.delete(id);
+            socket.emit('delete-elements', [id]);
+            pushHistory();
+        }
+        if (S.roomId) socket.emit('text-unlock', { id });
     }
-    if (S.roomId) socket.emit('text-unlock', { id });
-
-    requestRender();
     _textCommitting = false;
+    requestRender();
 }
 
 textInput.addEventListener('input', () => {
@@ -970,39 +1111,39 @@ textInput.addEventListener('input', () => {
     if (!el) return;
     el.text = textInput.value;          // keep local element in sync
     throttledTextPreview(el);           // broadcast live typing
+    autoResizeTextInput();
     requestRender();
 });
 
-textInput.addEventListener('blur', () => commitText());
-textInput.addEventListener('keydown', e => {
-    if (e.key === 'Escape') {
-        textInput.value = '';
-        commitText(); // will delete the empty element
-    }
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitText(); }
+textInput.addEventListener('blur', () => {
+    // Capture the ID at blur time. handleTextDown may synchronously commit
+    // the current element and open a NEW one within the same pointer event.
+    // Without capturing here, the 100ms delayed callback would see the NEW
+    // textEditingId and accidentally commit (delete) the freshly created element.
+    const idAtBlur = textEditingId;
+    setTimeout(() => {
+        if (textEditingId && textEditingId === idAtBlur) {
+            commitText();
+        }
+    }, 150);
 });
 
-// Double-click on a text element to open it for editing
-canvas.addEventListener('dblclick', (e) => {
-    if (S.tool !== 'select' && S.tool !== 'text') return;
-    const rect = canvas.getBoundingClientRect();
-    const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
-    const p = screenToWorld(sx, sy);
-    // Find a text element under cursor
-    let found = null;
-    S.elements.forEach(el => {
-        if (el.type === 'text' && hitTest(el, p.x, p.y)) found = el;
-    });
-    if (found) {
-        if (textLocked === found.id) { showToast('Another user is editing this text'); return; }
-        // Switch to text tool context and open edit
-        openTextInput({ x: found.x, y: found.y }, found);
+textInput.addEventListener('keydown', e => {
+    e.stopPropagation(); // prevent global shortcuts while typing
+    if (e.key === 'Escape') {
+        textInput.value = '';
+        commitText();
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        commitText();
     }
 });
 
 // ─── TEXT SYNC SOCKET EVENTS ─────────────────────────────────────────
 socket.on('text-preview', el => {
     // Update the stored element's text so remote typing is visible
+    if (el.id === textEditingId) return; // don't overwrite our own edits
     const existing = S.elements.get(el.id);
     if (existing) Object.assign(existing, { text: el.text });
     requestRender();
@@ -1372,6 +1513,8 @@ function showMobileColorBar(el) { showSelColorBtn(el); }
 function hideMobileColorBar() { hideSelColorBtn(); }
 
 function setTool(t) {
+    // Commit any in-progress text editing when switching tools
+    if (textEditingId) commitText();
     S.tool = t;
     toolBtns.forEach(b => b.classList.toggle('active', b.dataset.tool === t));
     fillSection.style.display = ['rectangle', 'ellipse'].includes(t) ? '' : 'none';
@@ -1669,7 +1812,8 @@ window.addEventListener('keyup', e => {
 });
 
 // ─── CANVAS EVENTS ───────────────────────────────────────────────────
-canvas.addEventListener('pointerdown', handlePointerDown);
+// non-passive so we can e.preventDefault() inside handlers (e.g. text tool on touch)
+canvas.addEventListener('pointerdown', handlePointerDown, { passive: false });
 canvas.addEventListener('pointermove', handlePointerMove);
 canvas.addEventListener('pointerup', handlePointerUp);
 canvas.addEventListener('pointerleave', handlePointerUp);
@@ -1677,6 +1821,25 @@ canvas.addEventListener('wheel', handleWheel, { passive: false });
 
 // Prevent context menu on canvas
 canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+// ─── DESKTOP TEXT: create text on 'click' (after pointerup) ─────────
+// The 'click' event fires after mouseup when implicit pointer capture is
+// already released, making textarea.focus() 100% reliable on all browsers.
+let _desktopTextTimer = null;
+canvas.addEventListener('click', e => {
+    if (S.tool !== 'text') { S._pendingTextPoint = null; return; }
+    if (e.pointerType === 'touch') return;
+    if (!S._pendingTextPoint) return;
+    if (S.isPanning) { S._pendingTextPoint = null; return; }
+
+    const pt = S._pendingTextPoint;
+    S._pendingTextPoint = null;
+    clearTimeout(_desktopTextTimer);
+    _desktopTextTimer = setTimeout(() => {
+        _desktopTextTimer = null;
+        handleTextDown(pt, null);
+    }, 0);
+});
 
 // ─── TOUCH GESTURES (pinch-to-zoom, two-finger pan) ──────────────────
 let lastTouchDist = 0;
@@ -1740,19 +1903,39 @@ canvas.addEventListener('touchend', e => {
 });
 
 // ─── DOUBLE-CLICK / DOUBLE-TAP: Select element or Hand Mode ──────────
+// Shared helper: select a text element on double-click/tap
+function selectTextElement(el) {
+    // If text is locked by another user, just show a toast
+    if (textLocked === el.id) { showToast('Another user is editing this text'); return; }
+    // Commit any currently open text edit first
+    if (textEditingId) commitText();
+    // Switch to select tool and select this element
+    setTool('select');
+    updateShapesBtn('select');
+    S.selectedIds.clear();
+    S.selectedIds.add(el.id);
+    // showPropsForSelection opens the props panel + mobile color bar
+    showPropsForSelection();
+    requestRender();
+}
+
 // Desktop: dblclick
 canvas.addEventListener('dblclick', e => {
+    // Cancel any pending single-click editor open so editor doesn't flash
+    clearTimeout(_desktopTextTimer);
+    _desktopTextTimer = null;
+    S._pendingTextPoint = null;
+
     const rect = canvas.getBoundingClientRect();
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
     const w = screenToWorld(sx, sy);
-    // Check if double-clicked on an element
     let hit = null;
     const els = [...S.elements.values()].reverse();
     for (const el of els) {
         if (hitTest(el, w.x, w.y)) { hit = el; break; }
     }
     if (hit) {
-        // Switch to select tool and select the element
+        // Double-click on any element → select it (works for text AND shapes)
         setTool('select');
         updateShapesBtn('select');
         S.selectedIds.clear();
@@ -1764,12 +1947,11 @@ canvas.addEventListener('dblclick', e => {
     }
 });
 
-// Mobile: detect double-tap via pointerdown (works reliably on all touch devices)
+// Mobile: detect double-tap via pointerdown — capture phase so this runs
+// BEFORE handlePointerDown, allowing us to stopPropagation on double-tap.
 let lastTapTime = 0;
 let lastTapX = 0;
 let lastTapY = 0;
-const DOUBLE_TAP_DELAY = 300; // ms
-const DOUBLE_TAP_DIST = 40;  // px tolerance
 
 canvas.addEventListener('pointerdown', e => {
     if (e.pointerType !== 'touch') return; // touch only
@@ -1779,24 +1961,22 @@ canvas.addEventListener('pointerdown', e => {
     const dist = Math.hypot(dx, dy);
 
     if (now - lastTapTime < DOUBLE_TAP_DELAY && dist < DOUBLE_TAP_DIST) {
-        // Double-tap confirmed
+        // Double-tap confirmed — intercept BEFORE handlePointerDown fires
         e.preventDefault();
+        e.stopPropagation(); // ← block handlePointerDown from running
+        // Cancel any delayed text-editor open scheduled from the 1st tap
+        clearTimeout(S._textTapTimer);
+        S._textTapTimer = null;
         const rect = canvas.getBoundingClientRect();
         const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
         const w = screenToWorld(sx, sy);
-        // Check if double-tapped on an element
         let hit = null;
         const els = [...S.elements.values()].reverse();
         for (const el of els) {
             if (hitTest(el, w.x, w.y)) { hit = el; break; }
         }
         if (hit) {
-            setTool('select');
-            updateShapesBtn('select');
-            S.selectedIds.clear();
-            S.selectedIds.add(hit.id);
-            showPropsForSelection();
-            requestRender();
+            selectTextElement(hit);
         } else if (S.tool !== 'text') {
             toggleHandMode();
         }
@@ -1806,7 +1986,8 @@ canvas.addEventListener('pointerdown', e => {
         lastTapX = e.clientX;
         lastTapY = e.clientY;
     }
-});
+}, { capture: true }); // capture phase = fires before handlePointerDown
+
 
 // ─── MOBILE: Auto-close props panel on canvas tap ────────────────────
 const propsPanel = $('props-panel');
