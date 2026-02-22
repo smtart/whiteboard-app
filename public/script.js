@@ -37,6 +37,8 @@ const S = {
     needsRender: true,
     resizing: false, resizeHandle: null, resizeStart: null, resizeOrigEl: null,
     remotePreviews: new Map(), // userId -> in-progress element
+    eraserSize: 16,
+    eraserScreenPos: null, // {x, y} screen coords for canvas cursor circle
 };
 
 // ─── DOM REFS ────────────────────────────────────────────────────────
@@ -320,6 +322,18 @@ function render() {
     // Draw cursors in screen space
     drawRemoteCursors();
 
+    // Draw eraser cursor circle
+    if (S.tool === 'eraser' && S.eraserScreenPos) {
+        const r = (S.eraserSize / 2) * S.vp.zoom;
+        ctx.beginPath();
+        ctx.arc(S.eraserScreenPos.x, S.eraserScreenPos.y, r, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(129, 140, 248, 0.7)';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(129, 140, 248, 0.08)';
+        ctx.fill();
+    }
+
     ctx.restore(); // dpr
 }
 
@@ -590,6 +604,12 @@ function handlePointerMove(e) {
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
     const w = screenToWorld(sx, sy);
     cursorPosDisplay.textContent = `${Math.round(w.x)}, ${Math.round(w.y)}`;
+
+    // Track eraser cursor position for canvas circle
+    if (S.tool === 'eraser') {
+        S.eraserScreenPos = { x: sx, y: sy };
+        requestRender();
+    }
 
     // Emit cursor
     throttledCursorEmit(w.x, w.y);
@@ -982,31 +1002,100 @@ socket.on('text-unlock', data => {
 
 
 // ─── ERASER TOOL ─────────────────────────────────────────────────────
-let eraserDeleted = [];
+let eraserChanged = false;
 
 function handleEraserDown(p) {
-    eraserDeleted = [];
+    eraserChanged = false;
     checkErase(p);
 }
 
 function handleEraserMove(p) { checkErase(p); }
 
 function handleEraserUp() {
-    if (eraserDeleted.length > 0) {
+    if (eraserChanged) {
         pushHistory();
     }
-    eraserDeleted = [];
+    eraserChanged = false;
 }
 
 function checkErase(p) {
+    const radius = S.eraserSize / 2;
     const toDelete = [];
+    const toAdd = [];  // new split segments from pen strokes
+
     S.elements.forEach((el, id) => {
-        if (hitTest(el, p.x, p.y)) toDelete.push(id);
+        if (el.type === 'pen' && el.points && el.points.length >= 2) {
+            // Partial pen erasing: remove points within eraser radius
+            const hitMargin = radius + (el.style.strokeWidth || 2);
+            let hasHit = false;
+            for (let i = 0; i < el.points.length; i++) {
+                if (Math.hypot(el.points[i].x - p.x, el.points[i].y - p.y) < hitMargin) {
+                    hasHit = true;
+                    break;
+                }
+            }
+            // Also check line segments between points
+            if (!hasHit) {
+                for (let i = 1; i < el.points.length; i++) {
+                    if (distToSeg(p.x, p.y, el.points[i - 1].x, el.points[i - 1].y, el.points[i].x, el.points[i].y) < hitMargin) {
+                        hasHit = true;
+                        break;
+                    }
+                }
+            }
+            if (!hasHit) return;
+
+            // Mark points to keep (outside eraser radius)
+            const surviving = el.points.filter(pt =>
+                Math.hypot(pt.x - p.x, pt.y - p.y) >= radius
+            );
+
+            if (surviving.length === el.points.length) return; // nothing erased
+
+            // Split surviving points into contiguous segments
+            // Points are contiguous if they were adjacent in the original array
+            const origIndices = surviving.map(pt => el.points.indexOf(pt));
+            const segments = [];
+            let seg = [surviving[0]];
+            for (let i = 1; i < surviving.length; i++) {
+                if (origIndices[i] - origIndices[i - 1] === 1) {
+                    seg.push(surviving[i]);
+                } else {
+                    if (seg.length >= 2) segments.push(seg);
+                    seg = [surviving[i]];
+                }
+            }
+            if (seg.length >= 2) segments.push(seg);
+
+            // Delete the original
+            toDelete.push(id);
+
+            // Create new elements for each surviving segment
+            segments.forEach(pts => {
+                const newEl = {
+                    id: uid(),
+                    type: 'pen',
+                    points: pts.map(pt => ({ x: pt.x, y: pt.y })),
+                    style: { ...el.style },
+                };
+                toAdd.push(newEl);
+            });
+        } else {
+            // Non-pen elements: delete whole element if hit
+            if (hitTest(el, p.x, p.y)) {
+                toDelete.push(id);
+            }
+        }
     });
-    if (toDelete.length) {
+
+    if (toDelete.length || toAdd.length) {
         toDelete.forEach(id => S.elements.delete(id));
-        socket.emit('delete-elements', toDelete);
-        eraserDeleted.push(...toDelete);
+        if (toDelete.length) socket.emit('delete-elements', toDelete);
+        toAdd.forEach(el => {
+            S.elements.set(el.id, el);
+            socket.emit('add-element', el);
+        });
+        eraserChanged = true;
         requestRender();
     }
 }
@@ -1018,7 +1107,7 @@ function updateCursorStyle() {
     switch (S.tool) {
         case 'select': canvas.style.cursor = 'default'; break;
         case 'pen': canvas.style.cursor = 'crosshair'; break;
-        case 'eraser': canvas.style.cursor = 'pointer'; break;
+        case 'eraser': canvas.style.cursor = 'none'; break;
         case 'text': canvas.style.cursor = 'text'; break;
         default: canvas.style.cursor = 'crosshair';
     }
@@ -1278,12 +1367,42 @@ function setTool(t) {
     } else {
         panel.classList.remove('panel-open');
     }
+    // Eraser size panel: show when eraser selected, hide otherwise
+    const eraserPanel = $('eraser-size-panel');
+    if (t === 'eraser') {
+        eraserPanel.classList.add('open');
+    } else {
+        eraserPanel.classList.remove('open');
+        S.eraserScreenPos = null;
+    }
     // Hide mobile color bar when switching away from select
     if (t !== 'select') hideMobileColorBar();
 }
 
 // Tool buttons (excluding shapes which are in the dropdown)
 toolBtns.forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+
+// ─── ERASER SIZE SLIDER ──────────────────────────────────────────────
+const eraserSlider = $('eraser-size-slider');
+const eraserSizeLabel = $('eraser-size-label');
+const eraserPreviewDot = $('eraser-preview-dot');
+const eraserPanel = $('eraser-size-panel');
+
+eraserSlider.addEventListener('input', () => {
+    const size = parseInt(eraserSlider.value, 10);
+    S.eraserSize = size;
+    eraserSizeLabel.textContent = size + 'px';
+    eraserPreviewDot.style.width = size + 'px';
+    eraserPreviewDot.style.height = size + 'px';
+});
+
+// Auto-close eraser panel when user starts drawing on canvas
+canvas.addEventListener('pointerdown', () => {
+    eraserPanel.classList.remove('open');
+}, { capture: false });
+
+// Prevent clicks inside eraser panel from closing it
+eraserPanel.addEventListener('pointerdown', (e) => e.stopPropagation());
 
 // ─── SHAPES DROPDOWN ─────────────────────────────────────────────────
 const shapesBtn = $('shapes-btn');

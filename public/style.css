@@ -1077,6 +1077,104 @@ input[type="range"]::-webkit-slider-thumb:hover {
     }
 }
 
+/* ─── Eraser Size Panel ──────────────────────────────────────────── */
+.eraser-wrapper {
+    position: relative;
+    display: flex;
+}
+
+.eraser-size-panel {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-top: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 12px 16px;
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(12px);
+    z-index: 500;
+    min-width: 180px;
+    flex-direction: column;
+    gap: 10px;
+    animation: dropIn 0.15s var(--ease);
+}
+
+.eraser-size-panel.open {
+    display: flex;
+}
+
+.eraser-size-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.eraser-size-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-2);
+    min-width: 34px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Range slider styling */
+.eraser-size-row input[type="range"] {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+    outline: none;
+    cursor: pointer;
+}
+
+.eraser-size-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--primary);
+    border: 2px solid var(--surface);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+    transition: transform 0.15s ease;
+}
+
+.eraser-size-row input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+}
+
+.eraser-size-row input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--primary);
+    border: 2px solid var(--surface);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+}
+
+.eraser-preview-wrap {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 54px;
+}
+
+.eraser-preview-dot {
+    border-radius: 50%;
+    border: 2px solid var(--primary);
+    background: rgba(129, 140, 248, 0.12);
+    transition: width 0.1s ease, height 0.1s ease;
+}
+
 /* ─── Modal ───────────────────────────────────────────────────────── */
 .modal-overlay {
     position: fixed;
@@ -1348,6 +1446,15 @@ button:focus:not(:focus-visible) {
         bottom: auto;
         z-index: 9999;
         min-width: 180px;
+    }
+
+    /* Eraser panel: centered on mobile */
+    .eraser-size-panel {
+        position: fixed;
+        top: auto;
+        left: 50% !important;
+        transform: translateX(-50%);
+        z-index: 9999;
     }
 
     .shapes-dropdown.open {

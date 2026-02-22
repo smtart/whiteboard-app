@@ -179,14 +179,26 @@
                             <line x1="8" y1="20" x2="16" y2="20" />
                         </svg>
                     </button>
-                    <button class="tool-btn" data-tool="eraser" title="Eraser (E)">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <path
-                                d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
-                            <line x1="7" y1="21" x2="21" y2="21" />
-                        </svg>
-                    </button>
+                    <div class="eraser-wrapper">
+                        <button class="tool-btn" data-tool="eraser" title="Eraser (E)">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path
+                                    d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
+                                <line x1="7" y1="21" x2="21" y2="21" />
+                            </svg>
+                        </button>
+                        <div class="eraser-size-panel" id="eraser-size-panel">
+                            <div class="eraser-size-row">
+                                <input type="range" id="eraser-size-slider" min="4" max="50" value="16" step="1">
+                                <span id="eraser-size-label" class="eraser-size-label">16px</span>
+                            </div>
+                            <div class="eraser-preview-wrap">
+                                <div id="eraser-preview-dot" class="eraser-preview-dot" style="width:16px;height:16px">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     <div class="tool-divider"></div>
                     <!-- Upload Image -->
                     <input type="file" id="img-upload-input" accept="image/*" style="display:none">
