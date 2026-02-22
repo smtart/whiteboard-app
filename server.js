@@ -9,6 +9,12 @@ const server = http.createServer(app);
 const io = new Server(server, {
     maxHttpBufferSize: 10e6,  // 10MB – needed for image data URLs
     perMessageDeflate: true,
+    cors: {
+        origin: '*',
+        methods: ['GET', 'POST'],
+    },
+    transports: ['polling', 'websocket'],  // polling first for Render proxy
+    allowUpgrades: true,
 });
 
 // ─── Security Headers ────────────────────────────────────────────────

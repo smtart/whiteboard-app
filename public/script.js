@@ -55,7 +55,7 @@ const toolBtns = document.querySelectorAll('.tool-btn[data-tool]');
 const usersContainer = $('users-container');
 
 // ─── SOCKET ──────────────────────────────────────────────────────────
-const socket = io();
+const socket = io({ transports: ['polling', 'websocket'], upgrade: true });
 
 // ─── UTILS ───────────────────────────────────────────────────────────
 function uid() {
