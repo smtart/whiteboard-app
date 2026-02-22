@@ -874,6 +874,7 @@ function handleLineUp() {
 // ─── TEXT TOOL ───────────────────────────────────────────────────────
 let textEditingId = null;   // ID of the element currently being typed into
 let textLocked = null;      // ID of element locked by a remote user
+let _textCommitting = false; // guard against re-entrant commitText
 
 const throttledTextPreview = throttle((el) => {
     if (S.roomId) socket.emit('text-preview', el);
@@ -894,7 +895,6 @@ function openTextInput(p, existingEl) {
         textInput.style.color = existingEl.style.strokeColor;
         textInput.dataset.wx = existingEl.x;
         textInput.dataset.wy = existingEl.y;
-        // Lock for others
         if (S.roomId) socket.emit('text-lock', { id: existingEl.id });
     } else {
         // New element — create immediately so remote users see placeholder
@@ -915,40 +915,53 @@ function openTextInput(p, existingEl) {
     }
 
     textInput.style.display = 'block';
-    // Focus immediately (synchronous) so mobile keyboard opens on the user gesture.
-    // setTimeout breaks the gesture chain on mobile, preventing keyboard from appearing.
+    // Focus synchronously — required for mobile keyboard to open on user gesture
     textInput.focus();
-    // Ensure focus sticks after layout
     requestAnimationFrame(() => textInput.focus());
     S.drawing = false;
 }
 
 function handleTextDown(p) {
+    // If already editing, commit the current text first (prevents duplicates)
+    if (textEditingId) {
+        commitText();
+    }
     openTextInput(p, null);
 }
 
 function commitText() {
+    // Guard: prevent re-entrant calls (blur fires when we hide the input)
+    if (_textCommitting) return;
+    if (!textEditingId) {
+        // Nothing to commit — just hide
+        textInput.style.display = 'none';
+        textInput.value = '';
+        return;
+    }
+    _textCommitting = true;
+
     const text = textInput.value.trim();
     const id = textEditingId;
+
+    // Reset state BEFORE hiding (so blur handler doesn't re-trigger)
+    textEditingId = null;
     textInput.style.display = 'none';
     textInput.value = '';
-    textEditingId = null;
 
-    if (id) {
-        const el = S.elements.get(id);
-        if (text && el) {
-            el.text = text;
-            socket.emit('update-element', el);
-            pushHistory();
-        } else if (!text && el) {
-            // Empty — delete the placeholder
-            S.elements.delete(id);
-            socket.emit('delete-elements', [id]);
-            pushHistory();
-        }
-        if (S.roomId) socket.emit('text-unlock', { id });
+    const el = S.elements.get(id);
+    if (text && el) {
+        el.text = text;
+        socket.emit('update-element', el);
+        pushHistory();
+    } else if (!text && el) {
+        // Empty text — delete the placeholder
+        S.elements.delete(id);
+        socket.emit('delete-elements', [id]);
     }
+    if (S.roomId) socket.emit('text-unlock', { id });
+
     requestRender();
+    _textCommitting = false;
 }
 
 textInput.addEventListener('input', () => {
@@ -960,11 +973,11 @@ textInput.addEventListener('input', () => {
     requestRender();
 });
 
-textInput.addEventListener('blur', commitText);
+textInput.addEventListener('blur', () => commitText());
 textInput.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
         textInput.value = '';
-        textInput.blur(); // triggers commitText which will delete empty element
+        commitText(); // will delete the empty element
     }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitText(); }
 });
