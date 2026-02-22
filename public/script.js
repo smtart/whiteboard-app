@@ -724,11 +724,12 @@ function handlePointerMove(e) {
 
     switch (S.tool) {
         case 'select': handleSelectMove(p); break;
-        case 'pen': handlePenMove(p); break;
+        case 'pen': handlePenMove(p, e); break;
         case 'rectangle': case 'ellipse': handleShapeMove(p, e.shiftKey); break;
         case 'line': case 'arrow': handleLineMove(p, e.shiftKey); break;
         case 'eraser': handleEraserMove(p); break;
     }
+    requestRender(); // single rAF per pointermove, regardless of tool
 }
 
 function handlePointerUp(e) {
@@ -880,11 +881,24 @@ function handlePenDown(p) {
     requestRender();
 }
 
-function handlePenMove(p) {
+function handlePenMove(p, e) {
     if (!S.current) return;
-    S.current.points.push({ x: p.x, y: p.y });
-    throttledPreviewEmit(S.current);
-    requestRender();
+    // getCoalescedEvents() recovers all intermediate points the browser
+    // batched between animation frames — critical for fast strokes on mobile.
+    const events = (e && e.getCoalescedEvents) ? e.getCoalescedEvents() : null;
+    if (events && events.length > 1) {
+        const rect = canvas.getBoundingClientRect();
+        for (const ce of events) {
+            const sx = ce.clientX - rect.left;
+            const sy = ce.clientY - rect.top;
+            S.current.points.push(screenToWorld(sx, sy));
+        }
+    } else {
+        S.current.points.push({ x: p.x, y: p.y });
+    }
+    // Emit immediately — pen sync has zero tolerance for throttle delay.
+    immediatePreviewEmit(S.current);
+    // requestRender() will be called by handlePointerMove after this returns.
 }
 
 function handlePenUp() {
@@ -1331,10 +1345,12 @@ const throttledCursorEmit = throttle((x, y) => {
     if (S.roomId) socket.emit('cursor-move', { x, y });
 }, 50);
 
-// Throttled live drawing preview — 30fps cap for pen strokes, instant for shapes
-const throttledPreviewEmit = throttle((el) => {
+// Live drawing preview — immediate for pen strokes, throttled for shapes
+// Pen needs the lowest possible latency; shapes update rarely so throttle is fine.
+function immediatePreviewEmit(el) {
     if (S.roomId) socket.emit('drawing-preview', el);
-}, 33);
+}
+const throttledPreviewEmit = throttle(immediatePreviewEmit, 32);
 
 socket.on('room-state', data => {
     S.myId = data.yourId;
@@ -1814,7 +1830,7 @@ window.addEventListener('keyup', e => {
 // ─── CANVAS EVENTS ───────────────────────────────────────────────────
 // non-passive so we can e.preventDefault() inside handlers (e.g. text tool on touch)
 canvas.addEventListener('pointerdown', handlePointerDown, { passive: false });
-canvas.addEventListener('pointermove', handlePointerMove);
+canvas.addEventListener('pointermove', handlePointerMove, { passive: false });
 canvas.addEventListener('pointerup', handlePointerUp);
 canvas.addEventListener('pointerleave', handlePointerUp);
 canvas.addEventListener('wheel', handleWheel, { passive: false });
@@ -2149,10 +2165,15 @@ imgUploadInput.addEventListener('change', () => {
                 dh = Math.round(dh * s);
             }
 
-            // ── 3. Center in viewport ─────────────────────────────────────
-            const rect = canvas.getBoundingClientRect();
-            const cx = S.vp.x + rect.width / 2 / S.vp.zoom;
-            const cy = S.vp.y + rect.height / 2 / S.vp.zoom;
+            // ── 3. Center in visible viewport ─────────────────────────────
+            // screenToWorld() accounts for current pan & zoom correctly.
+            const toolbarEl = document.getElementById('toolbar');
+            const statusEl = document.getElementById('status-bar');
+            const tbH = toolbarEl ? toolbarEl.offsetHeight : 0;
+            const sbH = statusEl ? statusEl.offsetHeight : 0;
+            const screenCx = window.innerWidth / 2;
+            const screenCy = tbH + (window.innerHeight - tbH - sbH) / 2;
+            const { x: cx, y: cy } = screenToWorld(screenCx, screenCy);
 
             // ── 4. Create element ─────────────────────────────────────────
             const el = {
